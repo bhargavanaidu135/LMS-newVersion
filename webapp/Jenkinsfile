@@ -1,0 +1,86 @@
+pipeline {
+    
+    agent {
+        label 'docker_webapp'
+    }
+     
+     stages {
+         stage('pull code')  {
+             steps {
+                 
+                 checkout([$class: 'GitSCM', branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: '', url: 'https://github.com/bhargavanaidu135/LMS-newVersion.git']]])
+             }
+           }
+         stage('notifying started job'){
+             steps { 
+                 script {
+                     slackSend (channel: 'bhargav_space', message: "Started: The Job '${env.JOB_NAME} [${env.BUILD_ID}]' teamdDomain: '${env.WORKSPACE}'")
+                  }
+               } 
+            }     
+           stage('manager approval'){ 
+             
+                steps { 
+                   script { 
+                       
+                   mail bcc: '', subject: "APPROVAL REQUIRED FOR THE $JOB_NAME" , body: """Build No.[$BUILD_NUMBER] required an approval for deployment. please click on the link ${BUILD_URL}console for more info. Thank you from bhargav""", cc: '', from: "user1@gmail.com", to: "user2@gmail.com"     
+                   def deploymentTimeout = input id: 'Deploy', message: 'Deploy to production?', parameters: [choice(choices: ['0', '5', '10'], description: 'minutes to delay deployment?', name: 'deploymentTimeout')]
+                   sleep time: deploymentTimeout.toInteger(), unit: 'MINUTES'
+                   
+                   }
+                }    
+            }
+            
+           
+            stage('build dockerfile'){
+              
+                steps {
+                  // to switch directory
+                    dir("${env.WORKSPACE}/webapp"){  
+                            sh "pwd"
+                withCredentials([usernamePassword(credentialsId: 'docker_hub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]) {        
+                sh 'docker build -t $dockerHubUser/$JOB_NAME:v1.$BUILD_ID .' 
+                 sh 'sudo docker run -dt --name frontend1 -p 80:80 --network lmsnet2 $dockerHubUser/$JOB_NAME:v1.$BUILD_ID'
+                }
+              }    
+            }  
+         }    
+          stage('Docker Push') {
+     	
+               steps {
+      	          withCredentials([usernamePassword(credentialsId: 'docker_hub', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]) {
+        	      sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPassword}"
+        	      sh 'docker push $dockerHubUser/$JOB_NAME:v1.$BUILD_ID'
+      	          }
+              }
+          } 
+        stage('send build results'){ 
+            steps {
+                
+                   echo 'Send Email'
+                
+            }  
+          } 
+        }    
+            
+             post {
+                 
+                 always {
+                   emailext to: "user1@gmail.com,user2@gmail.com",
+                   subject: "BUILD LOG OF THE JOB ${JOB_NAME}",
+                   body: "plese kindly open the link ${BUILD_URL}console for more info regarding the console output of build no.$BUILD_ID",
+                   attachLog: true
+                 }
+
+                  success {
+                   slackSend (color: '#00FF00', channel: 'bhargav_space', message: "Job '${env.JOB_NAME} with BuildNo.[${env.BUILD_ID}] has succeeded' teamdDomain: '${env.WORKSPACE}'")
+                  }
+                  
+                  failure {
+                   slackSend (color: '#FF0000', channel: 'bhargav_space', message: "Job '${env.JOB_NAME} with BuildNo.[${env.BUILD_ID}] has failed' teamdDomain: '${env.WORKSPACE}'")  
+                      
+                   }
+                  
+                }         
+                
+}    
